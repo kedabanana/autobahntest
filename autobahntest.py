@@ -49,16 +49,31 @@ class World():
         self.players = []
         self.autobahn = autobahn
 
-    def add_player(self, sessionid):
-        print("Adding player")
-        self.players.append(Player(self, sessionid))
+    #Returns the player array in a format more accessible for the javascript (I think)
+    def _marshal_players(self):
+        output = [] 
+        for player in self.players:
+            output.append([player.id, player.color, player.size, player.location])
+        return output
 
+    #Called on com.autobahntest.register, adds a new player and returns the current world details
+    def register_player(self, sessionid):
+        print("Registering Player")
+        self.players.append(Player(self, sessionid))
+        return self._marshal_players()
+
+    #Called on com.autobahntest.playermove, updates the players position and fires an event so client can update
     def move_player(self, sessionid, direction):
         #TODO check if the player doesn't exist
         print("Moving player")
         player = [ player for player in self.players if player.id == sessionid ][0]
         player.update_location(direction)
 
+    #Called on com.autobahntest.playerleft, removes the player from the player list. Do not need to notify client
+    #as they are also listening on this message
+    def remove_player(self, sessionid):
+        print("Removing player {}".format(sessionid))
+        self.players = [ player for player in self.players if player.id != sessionid ]
 
 # Mostly stolen from http://autobahn.ws/python/wamp/programming.html
 class PlayerMoveComponent(ApplicationSession):
@@ -69,27 +84,27 @@ class PlayerMoveComponent(ApplicationSession):
     # (happens in __main__ block)
     # This is where we setup our pub/sub stuff
     # Using inlineCallbacks instead of Deferreds because the code examples use this
+    # TODO: rewrite in Deferreds, or understand wtf @inlineCallbacks decorator does
     @inlineCallbacks
     def onJoin(self, details):
         self.id = details.session
         print("CREATING NEW SESSION WITH ID {}".format(self.id))
         self.world = World(self)
         
+
+        # Add a register RPC and listen for playermove events
         try:
             yield self.subscribe(self.world.move_player, u'com.autobahntest.playermove')
-            print("Subbed to topic")
-            yield self.subscribe(self.world.add_player, u'com.autobahntest.register')
+            yield self.subscribe(self.world.remove_player, u'com.autobahntest.playerleft')
+            yield self.register(self.world.register_player, u'com.autobahntest.register')
         except Exception as e:
             print("Could not sub to topic : {}".format(e))
 
 
     def onLeave(self, details):
-        #Tell other clients this player has left
-        self.publish(u'com.autobahntest.playerleft', (self.id))
-
+        pass
 
 
 if __name__ == '__main__':
-    print("DOING THIS")
     runner = ApplicationRunner(url=u'ws://127.0.0.1:8080/ws', realm=u'realm1')
     runner.run(PlayerMoveComponent)
